@@ -1,0 +1,7 @@
+.DS_Store
+Thumbs.db
+*.log
+tmp/
+# Mode B (build di komputer sendiri, shapefile tidak ikut di-upload):
+# hapus tanda # pada baris di bawah, lalu commit folder data/
+# raw/
