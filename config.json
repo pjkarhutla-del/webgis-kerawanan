@@ -27,22 +27,22 @@
     "kelas": [
       {
         "nilai": 4,
-        "label": "4 (Tertinggi)",
+        "label": "Sangat Tinggi",
         "warna": "#d32020"
       },
       {
         "nilai": 3,
-        "label": "3",
+        "label": "Tinggi",
         "warna": "#fb7050"
       },
       {
         "nilai": 2,
-        "label": "2",
+        "label": "Sedang",
         "warna": "#fcbea5"
       },
       {
         "nilai": 1,
-        "label": "1 (Terendah)",
+        "label": "Rendah",
         "warna": "#fff5f0"
       }
     ]
