@@ -1,0 +1,68 @@
+name: Build tiles & deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cek apakah ada data kerawanan mentah di raw/
+        id: chk
+        run: |
+          FOUND="$(find raw -maxdepth 1 -type f \( -iname '*.shp' -o -iname '*.geojson' \
+            -o -iname '*.json' -o -iname '*.gpkg' -o -iname '*.zip' \) -print -quit)"
+          if [ -n "$FOUND" ]; then
+            echo "Data mentah ditemukan: $FOUND"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tidak ada data mentah di raw/, build dilewati"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pasang GDAL dan tippecanoe
+        if: steps.chk.outputs.build == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gdal-bin build-essential libsqlite3-dev zlib1g-dev
+          git clone --depth 1 https://github.com/felt/tippecanoe.git /tmp/tippecanoe
+          make -C /tmp/tippecanoe -j"$(nproc)"
+          sudo make -C /tmp/tippecanoe install
+
+      - name: Build kerawanan.pmtiles
+        if: steps.chk.outputs.build == 'true'
+        # env:
+        #   SRC_EPSG: "32750"          # isi bila data tidak punya info CRS
+        #   KEEP_FIELDS: "kwn_karhut"  # hanya simpan kolom ini
+        run: bash scripts/build_data.sh
+
+      - name: Siapkan situs
+        run: |
+          mkdir _site
+          cp index.html config.json _site/
+          [ -d assets ] && cp -r assets _site/ || true
+          [ -d data ] && cp -r data _site/ || true
+          ls -lhR _site
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
