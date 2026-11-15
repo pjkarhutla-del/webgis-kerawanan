@@ -1,7 +1,0 @@
-.DS_Store
-Thumbs.db
-*.log
-tmp/
-# Mode B (build di komputer sendiri, data mentah tidak ikut di-upload):
-# hapus tanda # pada baris di bawah, lalu commit data/kerawanan.pmtiles
-# raw/
