@@ -27,10 +27,10 @@
       "z": 30,
       "popupFields": { "Rwn_karhut": "Kelas Kerawanan (1-4)" },
       "kelas": [
-        { "nilai": 4, "label": "4 (Tertinggi)", "warna": "#d32020" },
-        { "nilai": 3, "label": "3", "warna": "#fb7050" },
-        { "nilai": 2, "label": "2", "warna": "#fcbea5" },
-        { "nilai": 1, "label": "1 (Terendah)", "warna": "#fff5f0" }
+        { "nilai": 4, "label": "Sangat Tinggi", "warna": "#d32020" },
+        { "nilai": 3, "label": "Tinggi", "warna": "#fb7050" },
+        { "nilai": 2, "label": "Sedang", "warna": "#fcbea5" },
+        { "nilai": 1, "label": "Rendah", "warna": "#fff5f0" }
       ]
     },
     {
