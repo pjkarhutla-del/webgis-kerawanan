@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Peta Kerawanan Kebakaran</title>
+    <link rel="icon" href="assets/Logo%20KK.png" type="image/png" />
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+    <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+    <script src="https://unpkg.com/pmtiles@3.2.0/dist/pmtiles.js"></script>
+    <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        overflow: hidden;
+      }
+      body {
+        --sbo: 310px; /* lebar panel kiri saat terbuka */
+        --sbw: var(--sbo); /* lebar efektif (0 saat disembunyikan) */
+      }
+      body.sb-closed {
+        --sbw: 0px;
+      }
+      #map {
+        position: absolute;
+        inset: 0;
+      }
+      .maplibregl-ctrl-bottom-left {
+        left: var(--sbw);
+        transition: left 0.25s;
+      }
+
+      /* ---------- Panel kiri (menempel penuh, bisa disembunyikan) ---------- */
+      #sidebar {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: var(--sbo);
+        z-index: 4;
+        background: #fff;
+        box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
+        overflow-y: auto;
+        font-size: 13px;
+        transition: transform 0.25s;
+      }
+      body.sb-closed #sidebar {
+        transform: translateX(-100%);
+        box-shadow: none;
+      }
+      #sb-toggle {
+        position: absolute;
+        top: 12px;
+        left: var(--sbw);
+        z-index: 5;
+        width: 28px;
+        height: 56px;
+        border: 0;
+        border-radius: 0 8px 8px 0;
+        background: #1a3c6e;
+        color: #fff;
+        font-size: 14px;
+        cursor: pointer;
+        box-shadow: 2px 1px 6px rgba(0, 0, 0, 0.35);
+        transition: left 0.25s;
+      }
+      #sb-toggle:hover {
+        background: #2a5aa0;
+      }
+      .sb-sec {
+        padding: 10px 12px;
+        border-bottom: 1px solid #eee;
+      }
+      .sb-sec h4 {
+        margin: 0 0 6px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: #555;
+      }
+      .sb-sec label {
+        display: block;
+        padding: 2px 0;
+        cursor: pointer;
+      }
+      #cari {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 7px 9px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        font-size: 13px;
+      }
+      #hasil {
+        list-style: none;
+        margin: 4px 0 0;
+        padding: 0;
+        max-height: 180px;
+        overflow: auto;
+      }
+      #hasil li {
+        padding: 5px 6px;
+        cursor: pointer;
+        border-radius: 4px;
+      }
+      #hasil li:hover {
+        background: #e8f0fe;
+      }
+      .lg-hint {
+        font-size: 10.5px;
+        color: #777;
+        margin-bottom: 4px;
+        line-height: 1.35;
+      }
+
+      /* Judul peta */
+      .title-box {
+        position: absolute;
+        top: 12px;
+        left: calc(var(--sbw) + 42px);
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 14px;
+        background: rgba(0, 0, 0, 0.45);
+        border-radius: 8px;
+        pointer-events: none;
+        max-width: calc(100% - var(--sbw) - 130px);
+        transition: left 0.25s;
+      }
+      .title-box img {
+        height: 44px;
+      }
+      .title-box h3 {
+        margin: 0;
+        font-size: 17px;
+        color: #fff;
+        letter-spacing: 0.3px;
+      }
+      .title-box p {
+        margin: 2px 0 0;
+        font-size: 12px;
+        color: #eee;
+      }
+
+      /* ---------- Legenda interaktif (klik = tampil/sembunyi layer) ---------- */
+      .lg-group {
+        padding: 6px 4px 7px 6px;
+        border: 1px solid #e6e6e6;
+        border-radius: 6px;
+        margin-bottom: 6px;
+        cursor: pointer;
+        user-select: none;
+        background: #fff;
+      }
+      .lg-group:hover {
+        background: #f4f8ff;
+      }
+      .lg-head {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-weight: 600;
+      }
+      .lg-eye {
+        flex: none;
+        width: 14px;
+        height: 14px;
+        border: 2px solid #1a3c6e;
+        border-radius: 3px;
+        box-sizing: border-box;
+        background: #1a3c6e;
+        position: relative;
+      }
+      .lg-eye::after {
+        content: "";
+        position: absolute;
+        left: 2px;
+        top: -1px;
+        width: 3px;
+        height: 7px;
+        border: solid #fff;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+      }
+      .lg-group.off .lg-eye {
+        background: #fff;
+        border-color: #999;
+      }
+      .lg-group.off .lg-eye::after {
+        display: none;
+      }
+      .lg-group.off .lg-title,
+      .lg-group.off .lg-items {
+        opacity: 0.4;
+      }
+      .lg-group.off .lg-title {
+        text-decoration: line-through;
+      }
+      .lg-group.faint .lg-items {
+        opacity: 0.55;
+      }
+      .lg-title {
+        flex: 1;
+        min-width: 0;
+      }
+      .lg-note {
+        font-size: 10px;
+        font-weight: 400;
+        color: #888;
+        white-space: nowrap;
+      }
+      .grip {
+        flex: none;
+        width: 16px;
+        text-align: center;
+        font-size: 15px;
+        line-height: 18px;
+        color: #8a94a6;
+        cursor: grab;
+        touch-action: none;
+        border-radius: 4px;
+        margin-left: -2px;
+      }
+      .grip:hover,
+      .grip:focus-visible {
+        color: #1a3c6e;
+        background: #e3ebfa;
+        outline: none;
+      }
+      .lg-group.dragging {
+        position: relative;
+        z-index: 3;
+        opacity: 0.92;
+        background: #eef4ff;
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+        cursor: grabbing;
+      }
+      .lg-group.dragging .grip {
+        cursor: grabbing;
+      }
+      .lg-group.drop-before {
+        box-shadow: 0 -3px 0 #1a3c6e;
+      }
+      .lg-group.drop-after {
+        box-shadow: 0 3px 0 #1a3c6e;
+      }
+      .lg-items {
+        margin: 5px 4px 0 21px;
+      }
+      .lg-items .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 1px 0;
+      }
+      .op {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 6px;
+        font-size: 11px;
+        color: #555;
+        cursor: default;
+      }
+      .op input[type="range"] {
+        flex: 1;
+        min-width: 0;
+        margin: 0;
+      }
+      .op .opv {
+        width: 32px;
+        text-align: right;
+      }
+      .sw {
+        flex: none;
+        width: 18px;
+        height: 12px;
+        border: 1px solid rgba(0, 0, 0, 0.4);
+        box-sizing: border-box;
+      }
+      .lnsw {
+        flex: none;
+        width: 18px;
+        height: 0;
+        border-top: 3px solid #000;
+      }
+      .lnsw.kaw {
+        border-top-width: 3px;
+        outline: 1px solid rgba(0, 0, 0, 0.45);
+      }
+      .txsw {
+        flex: none;
+        width: 18px;
+        text-align: center;
+        font-weight: 800;
+        font-size: 10px;
+        color: #00334e;
+        text-shadow: 0 0 2px #fff, 0 0 2px #fff;
+        background: #cfd8dc;
+        border-radius: 2px;
+      }
+      .grad {
+        width: 100%;
+        height: 12px;
+        border: 1px solid rgba(0, 0, 0, 0.4);
+        box-sizing: border-box;
+      }
+      .ticks {
+        position: relative;
+        width: 100%;
+        height: 14px;
+        font-size: 10px;
+        color: #444;
+      }
+      .ticks span {
+        position: absolute;
+        transform: translateX(-50%);
+      }
+
+      /* Label nama kawasan (aturan sama dengan dashboard) */
+      .kawasan-dynamic-label {
+        background: transparent;
+        border: none;
+        box-shadow: none;
+        color: #00334e;
+        font-weight: 800;
+        text-align: center;
+        white-space: normal;
+        word-wrap: break-word;
+        width: 120px;
+        line-height: 1.1;
+        pointer-events: none;
+        text-shadow: -1.5px -1.5px 0 #fff, 1.5px -1.5px 0 #fff, -1.5px 1.5px 0 #fff,
+          1.5px 1.5px 0 #fff, 0 0 5px #fff;
+      }
+
+      .coord {
+        position: absolute;
+        right: 10px;
+        bottom: 10px;
+        z-index: 2;
+        background: rgba(255, 255, 255, 0.85);
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-family: Consolas, monospace;
+      }
+      .loading {
+        position: absolute;
+        inset: 0;
+        z-index: 6;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.35);
+        color: #fff;
+        font-size: 15px;
+        text-shadow: 0 1px 4px #000;
+      }
+      .banner {
+        position: absolute;
+        top: 70px;
+        left: calc(50% + var(--sbw) / 2);
+        transform: translateX(-50%);
+        z-index: 5;
+        background: #fff3cd;
+        color: #664d03;
+        border: 1px solid #ffecb5;
+        border-radius: 6px;
+        padding: 8px 14px;
+        font-size: 13px;
+        max-width: 70%;
+        cursor: pointer;
+      }
+
+      /* Popup */
+      .maplibregl-popup-content {
+        padding: 10px 12px;
+        font-size: 12px;
+        max-width: 320px;
+        max-height: 320px;
+        overflow: auto;
+      }
+      .pp-h {
+        font-weight: 700;
+        margin: 4px 0 3px;
+        color: #1a3c6e;
+      }
+      .pp-sec + .pp-sec {
+        border-top: 1px solid #ddd;
+        margin-top: 6px;
+      }
+      .pp-sec table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      .pp-sec td {
+        padding: 2px 4px;
+        vertical-align: top;
+        border-bottom: 1px dotted #ddd;
+      }
+      .pp-sec td:first-child {
+        color: #666;
+        white-space: nowrap;
+      }
+
+      @media (max-width: 700px) {
+        body {
+          --sbo: 86vw;
+        }
+        .title-box {
+          top: 8px;
+          max-width: calc(100% - 130px);
+        }
+        .title-box h3 {
+          font-size: 14px;
+        }
+        body:not(.sb-closed) .title-box {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <!-- Panel kiri: cari kawasan + peta dasar + legenda/layer -->
+    <aside id="sidebar">
+      <section class="sb-sec" id="sec-cari" hidden>
+        <h4>Cari Kawasan</h4>
+        <input id="cari" type="search" placeholder="Ketik nama kawasan..." autocomplete="off" />
+        <ul id="hasil"></ul>
+      </section>
+      <section class="sb-sec">
+        <h4>Peta Dasar</h4>
+        <div id="basemaps"></div>
+      </section>
+      <section class="sb-sec">
+        <h4>Legenda &amp; Layer</h4>
+        <div class="lg-hint">
+          Klik item untuk menampilkan / menyembunyikan layer. Seret pegangan ⠿ ke atas/bawah
+          untuk mengatur urutan (paling atas = tampil paling depan di peta). Geser slider untuk
+          opasitas tiap layer.
+        </div>
+        <div id="lg-list"></div>
+        <div id="lg-fixed"></div>
+      </section>
+    </aside>
+    <button id="sb-toggle" type="button" title="Sembunyikan panel">◀</button>
+
+    <div class="title-box">
+      <img src="assets/logo%20kehutanan.png" alt="" onerror="this.remove()" />
+      <img src="assets/Logo%20KK.png" alt="" onerror="this.remove()" />
+      <div>
+        <h3 id="judul">PETA KERAWANAN KEBAKARAN</h3>
+        <p id="subjudul"></p>
+      </div>
+    </div>
+
+    <div class="coord" id="coord">—</div>
+
+    <script>
+      const esc = (v) =>
+        String(v).replace(
+          /[&<>"']/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
+        );
+
+      function showBanner(msg) {
+        const d = document.createElement("div");
+        d.className = "banner";
+        d.title = "Klik untuk menutup";
+        d.innerHTML = msg;
+        d.onclick = () => d.remove();
+        document.body.appendChild(d);
+      }
+
+      const BASEMAPS = {
+        esri: {
+          label: "Esri Satelit",
+          tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+          attr: "Tiles &copy; Esri",
+          max: 19,
+        },
+        osm: {
+          label: "OpenStreetMap",
+          tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+          attr: "&copy; OpenStreetMap contributors",
+          max: 19,
+        },
+        topo: {
+          label: "Esri Topografi",
+          tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"],
+          attr: "Tiles &copy; Esri",
+          max: 19,
+        },
+      };
+
+      function walk(c, b) {
+        if (c.length && typeof c[0] === "number") {
+          if (c[0] < b[0]) b[0] = c[0];
+          if (c[1] < b[1]) b[1] = c[1];
+          if (c[0] > b[2]) b[2] = c[0];
+          if (c[1] > b[3]) b[3] = c[1];
+        } else for (const i of c) walk(i, b);
+      }
+      const bboxOf = (geom) => {
+        const b = [180, 90, -180, -90];
+        if (geom && geom.coordinates) walk(geom.coordinates, b);
+        return b;
+      };
+
+      async function loadJSON(url) {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(url + " (" + r.status + ")");
+        return r.json();
+      }
+
+      (async () => {
+        /* ---------- Konfigurasi ---------- */
+        let cfg;
+        try {
+          cfg = await (await fetch("config.json", { cache: "no-cache" })).json();
+        } catch (e) {
+          showBanner("Gagal membaca <b>config.json</b>. Periksa penulisan JSON-nya.");
+          return;
+        }
+        const W = cfg.kawasan || {};
+        const D = cfg.data || {};
+        const LAYERS = cfg.layers || [];
+
+        document.title = cfg.judul || document.title;
+        document.getElementById("judul").textContent = cfg.judul || "";
+        const now = new Date();
+        const tgl = now.toLocaleDateString("id-ID", {
+          weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Jakarta",
+        });
+        const jam = now
+          .toLocaleTimeString("id-ID", { hour12: false, timeZone: "Asia/Jakarta" })
+          .replace(/\./g, ":");
+        document.getElementById("subjudul").textContent =
+          (cfg.subjudul ? cfg.subjudul + " | " : "") + "Diakses: " + tgl + " " + jam + " WIB";
+
+        /* ---------- Panel kiri: sembunyikan / tampilkan ---------- */
+        const sbBtn = document.getElementById("sb-toggle");
+        const setSidebar = (open) => {
+          document.body.classList.toggle("sb-closed", !open);
+          sbBtn.textContent = open ? "◀" : "▶";
+          sbBtn.title = open ? "Sembunyikan panel" : "Tampilkan panel";
+        };
+        sbBtn.addEventListener("click", () => setSidebar(document.body.classList.contains("sb-closed")));
+        if (window.innerWidth < 700) setSidebar(false);
+        // Padding peta agar tidak tertutup panel kiri
+        const fitPad = (n) => ({
+          top: n, bottom: n, right: n,
+          left: document.body.classList.contains("sb-closed") ? n : n + 310,
+        });
+
+        const ov = document.createElement("div");
+        ov.className = "loading";
+        ov.textContent = "Memuat data peta...";
+        document.body.appendChild(ov);
+        setTimeout(() => ov.remove(), 20000);
+
+        /* ---------- Muat data ---------- */
+        // Kawasan: GeoJSON biasa. Semua layer lain: vector tiles (PMTiles).
+        const protocol = new pmtiles.Protocol();
+        maplibregl.addProtocol("pmtiles", protocol.tile);
+
+        const checks = LAYERS.map((L) => {
+          const url = new URL(L.file, location.href).href;
+          const p = new pmtiles.PMTiles(url);
+          protocol.add(p);
+          return p.getHeader().then(
+            () => ({ L, url, ok: true }),
+            () => ({ L, url, ok: false })
+          );
+        });
+        const empty = { type: "FeatureCollection", features: [] };
+        const [kawData, ...res] = await Promise.all([
+          loadJSON(D.kawasan || "data/kawasan.geojson").catch((e) => {
+            showBanner("Gagal memuat <b>" + esc(e.message) + "</b>");
+            return empty;
+          }),
+          ...checks,
+        ]);
+        const avail = res.filter((r) => r.ok).map((r) => ({ ...r.L, url: r.url }));
+        const miss = res.filter((r) => !r.ok).map((r) => r.L.file);
+        if (miss.length)
+          showBanner(
+            "Data belum tersedia (layer dilewati): <b>" + miss.map(esc).join(", ") +
+              "</b>. Jalankan build data (lihat README)."
+          );
+
+        // Nama kolom kawasan (tidak peka huruf besar/kecil)
+        const sample = (kawData.features[0] && kawData.features[0].properties) || {};
+        const findKey = (want, def) =>
+          Object.keys(sample).find((k) => k.toLowerCase() === String(want || "").toLowerCase()) ||
+          want || def;
+        const NAME_FIELD = findKey(W.namaField, "NKWS");
+        const LABEL_FIELD = findKey(W.labelField || W.namaField, "NKWS");
+
+        /* ---------- Ekspresi warna & filter (data tanpa nilai = tidak digambar) ---------- */
+        const num = (key) => ["to-number", ["get", key], -9999];
+        const stopsOf = (L) =>
+          [...(L.gradasi || [])].sort((a, b) => Number(a.nilai) - Number(b.nilai));
+        function colorExpr(L, key) {
+          if (L.kelas) {
+            const e = ["match", num(key)];
+            L.kelas.forEach((k) => e.push(Number(k.nilai), k.warna));
+            e.push("rgba(0,0,0,0)");
+            return e;
+          }
+          if (L.gradasi) {
+            const e = ["interpolate", ["linear"], num(key)];
+            stopsOf(L).forEach((s) => e.push(Number(s.nilai), s.warna));
+            return e;
+          }
+          return L.warna || "#ff00ff";
+        }
+        function filterExpr(L, key) {
+          if (L.kelas) return ["match", num(key), L.kelas.map((k) => Number(k.nilai)), true, false];
+          if (L.gradasi) {
+            const st = stopsOf(L);
+            return [">=", num(key), Number(L.min != null ? L.min : st[0].nilai)];
+          }
+          return null;
+        }
+
+        /* ---------- Item layer (data + batas kawasan), urutan awal menurut z ---------- */
+        const KAW_IDS = ["kawasan-fill", "kawasan-casing", "kawasan-line", "kawasan-hl"]; // bawah -> atas
+        const kawOp = W.opacity != null ? W.opacity : 1;
+        const items = [
+          ...avail.map((L) => ({
+            kind: "data", id: L.id, L, z: L.z || 0, mapIds: [L.id],
+            opacity: L.opacity != null ? L.opacity : L.tipe === "garis" ? 1 : 0.8,
+          })),
+          { kind: "kawasan", id: "kawasan", z: W.z != null ? W.z : 100, mapIds: KAW_IDS, opacity: kawOp },
+        ];
+
+        /* ---------- Style ---------- */
+        const sources = {};
+        const layers = [];
+        const awal = BASEMAPS[cfg.peta_dasar_awal] ? cfg.peta_dasar_awal : "esri";
+        for (const [id, b] of Object.entries(BASEMAPS)) {
+          sources["bm-" + id] = {
+            type: "raster", tiles: b.tiles, tileSize: 256, maxzoom: b.max, attribution: b.attr,
+          };
+          layers.push({
+            id: "bm-" + id, type: "raster", source: "bm-" + id,
+            layout: { visibility: id === awal ? "visible" : "none" },
+          });
+        }
+
+        for (const L of avail) sources[L.id] = { type: "vector", url: "pmtiles://" + L.url };
+        sources.kawasan = { type: "geojson", data: kawData, tolerance: 0.5, buffer: 64 };
+        const WARNA_KAWASAN = W.warnaGaris || "#AD3FFF";
+
+        const pushData = (it) => {
+          const L = it.L;
+          const base = {
+            id: L.id, source: L.id, "source-layer": L.id,
+            layout: { visibility: L.visible ? "visible" : "none" },
+          };
+          if (L.minzoom) base.minzoom = L.minzoom;
+          const flt = L.field ? filterExpr(L, L.field) : null;
+          if (L.tipe === "garis") {
+            layers.push({
+              ...base, type: "line",
+              layout: { ...base.layout, "line-cap": "round", "line-join": "round" },
+              paint: {
+                "line-color": L.warna || "#e53935",
+                "line-width": ["interpolate", ["linear"], ["zoom"], 6, 0.5, 10, 1, 14, 2.2],
+                "line-opacity": it.opacity,
+              },
+              ...(flt ? { filter: flt } : {}),
+            });
+          } else {
+            layers.push({
+              ...base, type: "fill",
+              paint: {
+                "fill-color": L.field ? colorExpr(L, L.field) : L.warna || "#8e24aa",
+                "fill-opacity": it.opacity,
+                "fill-antialias": false,
+              },
+              ...(flt ? { filter: flt } : {}),
+            });
+          }
+        };
+        const pushKawasan = (it) => {
+          layers.push({
+            id: "kawasan-fill", type: "fill", source: "kawasan",
+            paint: { "fill-color": "#000000", "fill-opacity": 0.01 },
+          });
+          layers.push({
+            id: "kawasan-casing", type: "line", source: "kawasan",
+            paint: { "line-color": "#000000", "line-opacity": 0.5 * it.opacity, "line-width": 3.2 },
+          });
+          layers.push({
+            id: "kawasan-line", type: "line", source: "kawasan",
+            paint: { "line-color": WARNA_KAWASAN, "line-opacity": it.opacity, "line-width": 1.6 },
+          });
+          layers.push({
+            id: "kawasan-hl", type: "line", source: "kawasan",
+            filter: ["==", ["get", NAME_FIELD], "__none__"],
+            paint: { "line-color": "#00e5ff", "line-opacity": it.opacity, "line-width": 4 },
+          });
+        };
+        [...items]
+          .sort((a, b) => a.z - b.z)
+          .forEach((it) => (it.kind === "data" ? pushData(it) : pushKawasan(it)));
+
+        const map = new maplibregl.Map({
+          container: "map",
+          style: { version: 8, sources, layers },
+          center: cfg.center || [118.0149, -2.5489],
+          zoom: cfg.zoom || 5,
+          dragRotate: false,
+          pitchWithRotate: false,
+          attributionControl: { compact: true },
+        });
+        map.touchZoomRotate.disableRotation();
+        map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+        map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
+        map.once("idle", () => ov.remove());
+
+        /* ---------- Indeks kawasan (bbox) & zoom awal ---------- */
+        const all = [180, 90, -180, -90];
+        const boxes = new Map();
+        const labelItems = [];
+        for (const f of kawData.features) {
+          const b = bboxOf(f.geometry);
+          if (b[0] > b[2]) continue;
+          all[0] = Math.min(all[0], b[0]); all[1] = Math.min(all[1], b[1]);
+          all[2] = Math.max(all[2], b[2]); all[3] = Math.max(all[3], b[3]);
+          const props = f.properties || {};
+          const n = props[NAME_FIELD];
+          if (n !== undefined && n !== null && n !== "") {
+            const o = boxes.get(String(n));
+            boxes.set(
+              String(n),
+              o ? [Math.min(o[0], b[0]), Math.min(o[1], b[1]), Math.max(o[2], b[2]), Math.max(o[3], b[3])] : b
+            );
+          }
+          const ln = props[LABEL_FIELD];
+          if (ln !== undefined && ln !== null && ln !== "")
+            labelItems.push({ name: String(ln), feat: f, bbox: b, whole: null });
+        }
+        if (cfg.zoomKeKawasan !== false && all[0] < all[2] && Math.abs(all[0]) <= 180 && Math.abs(all[3]) <= 90)
+          map.fitBounds([[all[0], all[1]], [all[2], all[3]]], { padding: fitPad(40), animate: false });
+
+        /* ---------- Label nama kawasan ---------- */
+        // Aturan sama dengan dashboard: tampil mulai zoom 9 (zoom Leaflet; di MapLibre = zoom - 1),
+        // ukuran font = max(8, 9 + (zoom-9)*1.1) px, ditempatkan pada titik di dalam bagian kawasan
+        // yang sedang terlihat di layar, warna #00334e dengan garis tepi putih.
+        const MIN_ZOOM_LABEL = W.labelMinZoom != null ? W.labelMinZoom : 9;
+        let labelsOn = true;
+        let labelMarkers = [];
+        function renderLabels() {
+          labelMarkers.forEach((m) => m.remove());
+          labelMarkers = [];
+          if (!labelsOn || typeof turf === "undefined") return;
+          const z = map.getZoom() + 1;
+          if (z < MIN_ZOOM_LABEL) return;
+          const bd = map.getBounds();
+          const vw = bd.getWest(), vs = bd.getSouth(), ve = bd.getEast(), vn = bd.getNorth();
+          const viewPoly = turf.bboxPolygon([vw, vs, ve, vn]);
+          const fs = Math.max(8, 9 + (z - MIN_ZOOM_LABEL) * 1.1);
+          for (const it of labelItems) {
+            const [x0, y0, x1, y1] = it.bbox;
+            if (x1 < vw || x0 > ve || y1 < vs || y0 > vn) continue;
+            let c;
+            try {
+              if (x0 >= vw && x1 <= ve && y0 >= vs && y1 <= vn) {
+                c = it.whole || (it.whole = turf.pointOnFeature(it.feat).geometry.coordinates);
+              } else {
+                const inter = turf.intersect(it.feat, viewPoly);
+                c = turf.pointOnFeature(inter || it.feat).geometry.coordinates;
+              }
+            } catch (e) {
+              continue;
+            }
+            const el = document.createElement("div");
+            el.className = "kawasan-dynamic-label";
+            el.innerHTML = `<div style="font-size:${fs}px">${esc(it.name)}</div>`;
+            labelMarkers.push(
+              new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat(c).addTo(map)
+            );
+          }
+        }
+        map.on("moveend", renderLabels);
+        map.once("load", renderLabels);
+
+        /* ---------- Peta dasar ---------- */
+        const bmBox = document.getElementById("basemaps");
+        for (const [id, b] of Object.entries(BASEMAPS)) {
+          const l = document.createElement("label");
+          l.innerHTML = `<input type="radio" name="bm" value="${id}" ${id === awal ? "checked" : ""}/> ${esc(b.label)}`;
+          bmBox.appendChild(l);
+        }
+        bmBox.addEventListener("change", (e) => {
+          for (const id of Object.keys(BASEMAPS))
+            map.setLayoutProperty("bm-" + id, "visibility", id === e.target.value ? "visible" : "none");
+        });
+
+        /* ---------- Legenda interaktif: tampil/sembunyi, opasitas, urutan ---------- */
+        const lgList = document.getElementById("lg-list");
+        const lgFixed = document.getElementById("lg-fixed");
+        const setVis = (ids, on) =>
+          ids.forEach((i) => map.setLayoutProperty(i, "visibility", on ? "visible" : "none"));
+
+        const gradBody = (L) => {
+          const st = stopsOf(L);
+          const lo = Number(st[0].nilai), hi = Number(st[st.length - 1].nilai);
+          const pos = (v) => (hi === lo ? 0 : ((Number(v) - lo) / (hi - lo)) * 100);
+          const css = st.map((s) => `${esc(s.warna)} ${pos(s.nilai).toFixed(1)}%`).join(", ");
+          const ticks = st
+            .map((s, i) => {
+              const t = i === st.length - 1 ? s.nilai + "+" : s.nilai;
+              return `<span style="left:${pos(s.nilai).toFixed(1)}%">${esc(t)}</span>`;
+            })
+            .join("");
+          return (
+            `<div class="grad" style="background:linear-gradient(to right, ${css})"></div>` +
+            `<div class="ticks">${ticks}</div>` +
+            (L.satuan ? `<div style="color:#666;font-size:10px">satuan: ${esc(L.satuan)}</div>` : "")
+          );
+        };
+        const bodyOf = (L) => {
+          if (L.kelas)
+            return L.kelas
+              .map((k) => `<div class="row"><span class="sw" style="background:${esc(k.warna)}"></span>${esc(k.label != null ? k.label : k.nilai)}</div>`)
+              .join("");
+          if (L.gradasi) return gradBody(L);
+          if (L.tipe === "garis")
+            return `<div class="row"><span class="lnsw" style="border-top-color:${esc(L.warna)}"></span>${esc(L.labelLegenda || L.judul)}</div>`;
+          return `<div class="row"><span class="sw" style="background:${esc(L.warna)}"></span>${esc(L.labelLegenda || L.judul)}</div>`;
+        };
+        const applyOpacity = (it, v) => {
+          if (it.kind === "kawasan") {
+            map.setPaintProperty("kawasan-line", "line-opacity", v);
+            map.setPaintProperty("kawasan-casing", "line-opacity", 0.5 * v);
+            map.setPaintProperty("kawasan-hl", "line-opacity", v);
+          } else if (it.L.tipe === "garis") map.setPaintProperty(it.id, "line-opacity", v);
+          else map.setPaintProperty(it.id, "fill-opacity", v);
+        };
+
+        // Urutan tampilan: indeks 0 = paling atas di peta (dan paling atas di daftar)
+        let order = [...items].sort((a, b) => b.z - a.z);
+        const applyMapOrder = () => {
+          [...order].reverse().forEach((it) => it.mapIds.forEach((id) => map.moveLayer(id)));
+        };
+        const renderOrder = () => {
+          order.forEach((it) => lgList.appendChild(it.el));
+        };
+        const move = (it, d) => {
+          const i = order.indexOf(it), j = i + d;
+          if (j < 0 || j >= order.length) return;
+          [order[i], order[j]] = [order[j], order[i]];
+          renderOrder();
+          applyMapOrder();
+        };
+
+        // Seret pegangan ⠿ untuk memindah layer. Elemen tidak dipindah di DOM selama menyeret
+        // (hanya digeser dengan transform + garis penanda), supaya aman di layar sentuh.
+        const sidebarEl = document.getElementById("sidebar");
+        const attachDrag = (it) => {
+          const grip = it.el.querySelector(".grip");
+          grip.addEventListener("click", (e) => e.stopPropagation());
+          grip.addEventListener("keydown", (e) => {
+            if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+            e.preventDefault();
+            e.stopPropagation();
+            move(it, e.key === "ArrowUp" ? -1 : 1);
+            grip.focus();
+          });
+          grip.addEventListener("pointerdown", (e) => {
+            if (e.button !== undefined && e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            grip.setPointerCapture(e.pointerId);
+            const startY = e.clientY;
+            const startScroll = sidebarEl.scrollTop;
+            let target = null; // elemen yang akan berada tepat di bawah posisi jatuh (null = paling bawah)
+            const others = order.filter((x) => x !== it);
+            it.el.classList.add("dragging");
+
+            const clearMarks = () =>
+              others.forEach((x) => x.el.classList.remove("drop-before", "drop-after"));
+            const onMove = (ev) => {
+              const sr = sidebarEl.getBoundingClientRect();
+              if (ev.clientY < sr.top + 36) sidebarEl.scrollTop -= 10;
+              else if (ev.clientY > sr.bottom - 36) sidebarEl.scrollTop += 10;
+              const dy = ev.clientY - startY + (sidebarEl.scrollTop - startScroll);
+              it.el.style.transform = `translateY(${dy}px)`;
+              clearMarks();
+              target = null;
+              for (const x of others) {
+                const r = x.el.getBoundingClientRect();
+                if (ev.clientY < r.top + r.height / 2) {
+                  target = x;
+                  break;
+                }
+              }
+              if (target) target.el.classList.add("drop-before");
+              else if (others.length) others[others.length - 1].el.classList.add("drop-after");
+            };
+            const onEnd = () => {
+              grip.removeEventListener("pointermove", onMove);
+              grip.removeEventListener("pointerup", onEnd);
+              grip.removeEventListener("pointercancel", onEnd);
+              clearMarks();
+              it.el.classList.remove("dragging");
+              it.el.style.transform = "";
+              const next = [...others];
+              next.splice(target ? next.indexOf(target) : next.length, 0, it);
+              if (next.some((x, i) => x !== order[i])) {
+                order = next;
+                renderOrder();
+                applyMapOrder();
+              }
+            };
+            grip.addEventListener("pointermove", onMove);
+            grip.addEventListener("pointerup", onEnd);
+            grip.addEventListener("pointercancel", onEnd);
+          });
+        };
+
+        const buildGroup = (it) => {
+          const isK = it.kind === "kawasan";
+          const L = it.L || {};
+          const title = isK ? W.judul || "Batas Kawasan" : L.judul || L.id;
+          const body = isK
+            ? `<div class="row"><span class="lnsw kaw" style="border-top-color:${esc(WARNA_KAWASAN)}"></span>Batas kawasan</div>`
+            : bodyOf(L);
+          it.on = isK ? true : !!L.visible;
+          it.minzoom = isK ? 0 : L.minzoom || 0;
+          const el = document.createElement("div");
+          el.className = "lg-group" + (it.on ? "" : " off");
+          el.setAttribute("role", "switch");
+          el.tabIndex = 0;
+          el.setAttribute("aria-checked", String(it.on));
+          el.innerHTML =
+            `<div class="lg-head"><span class="grip" role="button" tabindex="0" title="Seret untuk mengubah urutan (atau tombol panah atas/bawah)" aria-label="Ubah urutan ${esc(title)}">⠿</span>` +
+            `<span class="lg-eye"></span><span class="lg-title">${esc(title)}</span>` +
+            (it.minzoom ? `<span class="lg-note">zoom ≥ ${it.minzoom}</span>` : "") +
+            `</div>` +
+            `<div class="lg-items">${body}` +
+            `<div class="op"><span>Opasitas</span><input type="range" min="0" max="100" step="5" value="${Math.round(it.opacity * 100)}" aria-label="Opasitas ${esc(title)}"/><span class="opv">${Math.round(it.opacity * 100)}%</span></div></div>`;
+          it.el = el;
+          el.dataset.id = it.id;
+          const toggle = () => {
+            it.on = !it.on;
+            el.classList.toggle("off", !it.on);
+            el.setAttribute("aria-checked", String(it.on));
+            setVis(it.mapIds, it.on);
+          };
+          el.addEventListener("click", toggle);
+          el.addEventListener("keydown", (e) => {
+            if (e.target !== el) return;
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              toggle();
+            }
+          });
+          attachDrag(it);
+          const op = el.querySelector(".op");
+          op.addEventListener("click", (e) => e.stopPropagation());
+          const rng = op.querySelector("input");
+          const opv = op.querySelector(".opv");
+          rng.addEventListener("input", () => {
+            it.opacity = rng.value / 100;
+            opv.textContent = rng.value + "%";
+            applyOpacity(it, it.opacity);
+          });
+        };
+        items.forEach(buildGroup);
+        renderOrder();
+
+        // Label kawasan: hanya tampil/sembunyi (selalu paling depan)
+        const lbl = document.createElement("div");
+        lbl.className = "lg-group";
+        lbl.setAttribute("role", "switch");
+        lbl.tabIndex = 0;
+        lbl.setAttribute("aria-checked", "true");
+        lbl.innerHTML =
+          `<div class="lg-head"><span class="lg-eye"></span><span class="lg-title">Label Kawasan</span>` +
+          `<span class="lg-note">zoom ≥ ${Math.max(0, MIN_ZOOM_LABEL - 1)}</span></div>` +
+          `<div class="lg-items"><div class="row"><span class="txsw">Aa</span>Nama kawasan (${esc(LABEL_FIELD)})</div></div>`;
+        const toggleLabel = () => {
+          labelsOn = !labelsOn;
+          lbl.classList.toggle("off", !labelsOn);
+          lbl.setAttribute("aria-checked", String(labelsOn));
+          renderLabels();
+        };
+        lbl.addEventListener("click", toggleLabel);
+        lbl.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggleLabel();
+          }
+        });
+        lgFixed.appendChild(lbl);
+
+        // Redupkan item layer yang belum terlihat pada zoom saat ini
+        const refreshFaint = () => {
+          const z = map.getZoom();
+          items.forEach((it) => it.el.classList.toggle("faint", !!it.minzoom && z < it.minzoom));
+        };
+        map.on("zoom", refreshFaint);
+        refreshFaint();
+
+        /* ---------- Pencarian kawasan ---------- */
+        const highlight = (name) =>
+          map.setFilter("kawasan-hl", ["==", ["get", NAME_FIELD], name == null ? "__none__" : name]);
+        if (boxes.size) {
+          const idx = [...boxes].map(([n, b]) => ({ n, b })).sort((a, b) => a.n.localeCompare(b.n, "id"));
+          document.getElementById("sec-cari").hidden = false;
+          const input = document.getElementById("cari");
+          const ul = document.getElementById("hasil");
+          input.addEventListener("input", () => {
+            const q = input.value.trim().toLowerCase();
+            ul.innerHTML = "";
+            if (q.length < 2) return highlight(null);
+            idx.filter((o) => o.n.toLowerCase().includes(q)).slice(0, 12).forEach((o) => {
+              const li = document.createElement("li");
+              li.textContent = o.n;
+              li.onclick = () => {
+                map.fitBounds([[o.b[0], o.b[1]], [o.b[2], o.b[3]]], { padding: fitPad(60), maxZoom: 14 });
+                highlight(o.n);
+                ul.innerHTML = "";
+                input.value = o.n;
+              };
+              ul.appendChild(li);
+            });
+          });
+        }
+
+        /* ---------- Diagnosa kolom (muncul hanya bila ada yang tidak cocok) ---------- */
+        const pending = new Map(avail.filter((L) => L.field).map((L) => [L.id, L]));
+        const diagnose = () => {
+          for (const [id, L] of [...pending]) {
+            if (map.getLayoutProperty(id, "visibility") === "none") continue;
+            if (L.minzoom && map.getZoom() < L.minzoom) continue;
+            let fs = [];
+            try {
+              fs = map.querySourceFeatures(id, { sourceLayer: id });
+            } catch (e) {}
+            if (!fs.length) continue;
+            pending.delete(id);
+            const keys = Object.keys(fs[0].properties || {});
+            const found = keys.find((k) => k.toLowerCase() === L.field.toLowerCase());
+            if (!found) {
+              showBanner(
+                "Layer <b>" + esc(L.judul || id) + "</b>: kolom <b>" + esc(L.field) +
+                  "</b> tidak ada. Kolom tersedia: <b>" + keys.map(esc).join(", ") +
+                  "</b>. Ubah <code>field</code> pada layer ini di config.json."
+              );
+            } else if (found !== L.field && L.tipe !== "garis") {
+              L.field = found;
+              map.setPaintProperty(id, "fill-color", colorExpr(L, found));
+              map.setFilter(id, filterExpr(L, found));
+            }
+          }
+        };
+        map.on("idle", diagnose);
+
+        /* ---------- Popup ---------- */
+        function section(title, props, fields, L) {
+          // Kolom yang ditampilkan: daftar popupFields (tidak peka huruf besar/kecil) atau semua kolom
+          const lab = {};
+          Object.entries(fields || {}).forEach(([k, v]) => (lab[k.toLowerCase()] = v));
+          const restrict = Object.keys(lab).length > 0;
+          const keys = Object.keys(props).filter((k) => !restrict || k.toLowerCase() in lab);
+          const show = (k) => {
+            const v = props[k];
+            if (L && L.kelas && L.field && k.toLowerCase() === L.field.toLowerCase()) {
+              const hit = L.kelas.find((c) => Number(c.nilai) === Number(v));
+              if (hit) {
+                const t = String(hit.label != null ? hit.label : hit.nilai);
+                return t.includes(String(v)) ? t : t + " (" + v + ")";
+              }
+            }
+            return v;
+          };
+          const rows = keys
+            .filter((k) => props[k] !== undefined && props[k] !== null && props[k] !== "")
+            .map((k) => `<tr><td>${esc(lab[k.toLowerCase()] || k)}</td><td>${esc(show(k))}</td></tr>`)
+            .join("");
+          return rows
+            ? `<div class="pp-sec"><div class="pp-h">${esc(title)}</div><table>${rows}</table></div>`
+            : "";
+        }
+        const isVisible = (id) => map.getLayoutProperty(id, "visibility") !== "none";
+        const pad = (pt, r) => [[pt.x - r, pt.y - r], [pt.x + r, pt.y + r]];
+        map.on("click", (e) => {
+          let html = "";
+          // Urutan popup mengikuti urutan layer di peta (paling atas dulu)
+          for (const it of order) {
+            if (!isVisible(it.mapIds[0])) continue;
+            if (it.kind === "kawasan") {
+              const w = map.queryRenderedFeatures(e.point, { layers: ["kawasan-fill"] })[0];
+              if (w) html += section(W.judul || "Kawasan", w.properties, W.popupFields);
+            } else {
+              const L = it.L;
+              const area = L.tipe === "garis" ? pad(e.point, 5) : e.point;
+              const f = map.queryRenderedFeatures(area, { layers: [L.id] })[0];
+              if (f) html += section(L.judul || L.id, f.properties, L.popupFields, L);
+            }
+          }
+          if (html) new maplibregl.Popup({ maxWidth: "340px" }).setLngLat(e.lngLat).setHTML(html).addTo(map);
+        });
+        map.on("mousemove", (e) => {
+          const ids = ["kawasan-fill", ...avail.map((L) => L.id)].filter(isVisible);
+          const hit = ids.length ? map.queryRenderedFeatures(pad(e.point, 2), { layers: ids }).length : 0;
+          map.getCanvas().style.cursor = hit ? "pointer" : "";
+          document.getElementById("coord").textContent =
+            "z" + map.getZoom().toFixed(1) + " | " + e.lngLat.lat.toFixed(5) + ", " + e.lngLat.lng.toFixed(5);
+        });
+      })();
+    </script>
+  </body>
+</html>
