@@ -12,7 +12,7 @@
     "namaField": "NKWS",
     "labelField": "NKWS",
     "labelMinZoom": 9,
-    "warnaGaris": "#ffffff",
+    "warnaGaris": "#ac3fff",
     "popupFields": {}
   },
   "layers": [
